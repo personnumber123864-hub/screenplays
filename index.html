@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Screenplay Submission Portal</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0d0d0d;
+            color: #f0f0f0;
+        }
+        .card {
+            background-color: #1a1a1a;
+            border: 1px solid #333;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+        }
+        .submit-btn {
+            background-color: #E50914; /* Netflix Red */
+            transition: transform 0.1s, box-shadow 0.1s;
+        }
+        .submit-btn:hover {
+            background-color: #CC0812;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 10px rgba(229, 9, 20, 0.4);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="app" class="min-h-screen p-4 md:p-8 flex flex-col items-center">
+        <!-- Header -->
+        <header class="w-full max-w-4xl text-center mb-8">
+            <h1 class="text-4xl font-extrabold tracking-tight text-white md:text-5xl">
+                The Writer's Vault
+            </h1>
+            <p class="text-lg mt-2 text-gray-400">Securely submit your cinematic work for review.</p>
+        </header>
+
+        <!-- Main Content Grid -->
+        <main class="w-full max-w-4xl grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+            <!-- Submission Form (Column 1) -->
+            <div class="lg:col-span-1 card p-6 rounded-xl h-fit">
+                <h2 class="text-2xl font-semibold mb-6 border-b border-gray-700 pb-2">Submit Screenplay</h2>
+                <form id="submission-form" class="space-y-4">
+                    
+                    <div>
+                        <label for="file-input" class="block text-sm font-medium text-gray-300 mb-1">Upload PDF (Screenplay)</label>
+                        <input type="file" id="file-input" accept=".pdf" required
+                               class="w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-gray-700 file:text-white hover:file:bg-gray-600 cursor-pointer rounded-lg bg-gray-800 p-2 border border-gray-700"/>
+                        <p class="text-xs text-gray-500 mt-1">Only PDF files are accepted.</p>
+                    </div>
+
+                    <div>
+                        <label for="title-input" class="block text-sm font-medium text-gray-300 mb-1">Title</label>
+                        <input type="text" id="title-input" required placeholder="e.g., The Midnight Watch"
+                               class="w-full p-3 rounded-lg bg-gray-800 border border-gray-700 focus:ring-red-500 focus:border-red-500 text-white"/>
+                    </div>
+                    
+                    <div>
+                        <label for="logline-input" class="block text-sm font-medium text-gray-300 mb-1">Logline</label>
+                        <textarea id="logline-input" rows="3" required placeholder="A brief, compelling summary (25 words max)."
+                                  class="w-full p-3 rounded-lg bg-gray-800 border border-gray-700 focus:ring-red-500 focus:border-red-500 text-white resize-none"></textarea>
+                    </div>
+                    
+                    <button type="submit" id="submit-button" class="submit-btn w-full py-3 mt-4 rounded-lg font-bold text-white uppercase tracking-wider disabled:bg-gray-600 disabled:cursor-not-allowed">
+                        <span id="button-text">Submit Screenplay</span>
+                        <div id="loading-spinner" class="hidden animate-spin rounded-full h-5 w-5 border-b-2 border-white mx-auto"></div>
+                    </button>
+                    
+                    <!-- Submission Message -->
+                    <p id="submission-message" class="text-center text-sm mt-3 hidden"></p>
+                </form>
+
+                <p id="user-id-display" class="text-xs text-gray-500 mt-6 text-center break-words">
+                    <!-- User ID will be populated here -->
+                </p>
+            </div>
+
+            <!-- Screenplay List (Columns 2 & 3) -->
+            <div class="lg:col-span-2 card p-6 rounded-xl">
+                <h2 class="text-2xl font-semibold mb-6 border-b border-gray-700 pb-2">Your Submissions (<span id="count-display">0</span>)</h2>
+                <div id="screenplays-list" class="space-y-4">
+                    <!-- Screenplay cards will be rendered here -->
+                    <p id="empty-state" class="text-center text-gray-500 py-12">No screenplays uploaded yet. Start writing!</p>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, onSnapshot, doc, addDoc, serverTimestamp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // IMPORTANT: Use the global variables provided by the Canvas environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        if (!firebaseConfig) {
+            console.error("Firebase configuration is missing.");
+            document.getElementById('app').innerHTML = '<p class="text-red-500 text-center mt-20">Configuration error. Cannot initialize Firebase.</p>';
+            throw new Error("Firebase configuration missing.");
+        }
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+        
+        // Set log level for debugging
+        setLogLevel('error');
+
+        let userId = null;
+        let isAuthReady = false;
+
+        const screenplaysList = document.getElementById('screenplays-list');
+        const emptyState = document.getElementById('empty-state');
+        const form = document.getElementById('submission-form');
+        const submitButton = document.getElementById('submit-button');
+        const buttonText = document.getElementById('button-text');
+        const loadingSpinner = document.getElementById('loading-spinner');
+        const submissionMessage = document.getElementById('submission-message');
+        const countDisplay = document.getElementById('count-display');
+        const userIdDisplay = document.getElementById('user-id-display');
+
+        // --- Authentication and Initialization ---
+
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                userId = user.uid;
+                userIdDisplay.textContent = `User ID: ${userId}`;
+                isAuthReady = true;
+                console.log("Authentication successful. User ID:", userId);
+                loadScreenplays();
+            } else {
+                console.log("User signed out or failed to sign in.");
+                userId = null;
+                isAuthReady = true;
+            }
+        });
+
+        // Sign in using custom token or anonymously
+        async function authenticateUser() {
+            try {
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                    console.log("Signed in with custom token.");
+                } else {
+                    await signInAnonymously(auth);
+                    console.log("Signed in anonymously.");
+                }
+            } catch (error) {
+                console.error("Firebase Auth error:", error.message);
+                // Fallback: If auth fails, try to proceed, but Firestore operations will fail
+                isAuthReady = true;
+            }
+        }
+
+        authenticateUser();
+
+        // --- Data Handling ---
+
+        function getUserScreenplaysPath(uid) {
+            // Path: /artifacts/{appId}/users/{userId}/screenplays
+            return `artifacts/${appId}/users/${uid}/screenplays`;
+        }
+
+        async function uploadScreenplay(event) {
+            event.preventDefault();
+            
+            if (!isAuthReady || !userId) {
+                showMessage('Authentication not ready. Please wait a moment and try again.', 'text-yellow-400');
+                return;
+            }
+
+            const fileInput = document.getElementById('file-input');
+            const titleInput = document.getElementById('title-input');
+            const loglineInput = document.getElementById('logline-input');
+
+            const file = fileInput.files[0];
+            const title = titleInput.value.trim();
+            const logline = loglineInput.value.trim();
+
+            if (!file) {
+                showMessage('Please select a PDF file to upload.', 'text-red-400');
+                return;
+            }
+
+            // UI Feedback: Disable button and show loading spinner
+            submitButton.disabled = true;
+            buttonText.classList.add('hidden');
+            loadingSpinner.classList.remove('hidden');
+
+            try {
+                const collectionRef = collection(db, getUserScreenplaysPath(userId));
+                
+                // We are only storing metadata, not the actual large file content.
+                // In a production environment, the file itself would be uploaded to
+                // Firebase Storage, and the storage URL would be saved in Firestore.
+                const screenplayData = {
+                    title: title,
+                    logline: logline,
+                    filename: file.name,
+                    size: file.size, // Store file size for reference
+                    uploadedAt: serverTimestamp(),
+                    isPdf: file.type === 'application/pdf',
+                };
+
+                await addDoc(collectionRef, screenplayData);
+                
+                showMessage('Success! Screenplay metadata saved.', 'text-green-400');
+                form.reset();
+            } catch (error) {
+                console.error("Error saving screenplay metadata:", error);
+                showMessage(`Error: ${error.message || 'Failed to save data to Firestore.'}`, 'text-red-400');
+            } finally {
+                // UI Feedback: Enable button and hide loading spinner
+                submitButton.disabled = false;
+                buttonText.classList.remove('hidden');
+                loadingSpinner.classList.add('hidden');
+            }
+        }
+
+        function loadScreenplays() {
+            if (!isAuthReady || !userId) return;
+
+            const collectionRef = collection(db, getUserScreenplaysPath(userId));
+            
+            // Listen for real-time updates
+            onSnapshot(collectionRef, (snapshot) => {
+                const screenplays = [];
+                snapshot.forEach((doc) => {
+                    screenplays.push({ id: doc.id, ...doc.data() });
+                });
+
+                renderScreenplays(screenplays);
+            }, (error) => {
+                console.error("Error listening to screenplays:", error);
+                screenplaysList.innerHTML = `<p class="text-red-500 text-center py-12">Failed to load submissions: ${error.message}</p>`;
+            });
+        }
+
+        function renderScreenplays(screenplays) {
+            countDisplay.textContent = screenplays.length;
+            if (screenplays.length === 0) {
+                emptyState.classList.remove('hidden');
+                screenplaysList.innerHTML = '';
+                screenplaysList.appendChild(emptyState);
+                return;
+            }
+
+            emptyState.classList.add('hidden');
+            screenplaysList.innerHTML = screenplays.map(s => {
+                const date = s.uploadedAt ? new Date(s.uploadedAt.seconds * 1000).toLocaleDateString() : 'N/A';
+                const fileSizeKB = s.size ? (s.size / 1024).toFixed(2) : 'N/A';
+                
+                return `
+                    <div class="p-4 card rounded-xl hover:bg-gray-800 transition duration-200 border-l-4 border-red-600 space-y-2">
+                        <div class="flex justify-between items-start">
+                            <h3 class="text-xl font-bold text-white">${s.title}</h3>
+                            <span class="text-sm text-gray-400 bg-gray-700 px-2 py-0.5 rounded-full">${date}</span>
+                        </div>
+                        <p class="text-sm italic text-gray-300">${s.logline}</p>
+                        <div class="text-xs text-gray-500 pt-2 flex justify-between items-center">
+                            <span>File: ${s.filename} (${fileSizeKB} KB)</span>
+                            <button onclick="viewScreenplay('${s.id}')" class="text-red-400 hover:text-red-300 font-medium">
+                                View Details
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        // Simple message display utility
+        function showMessage(message, colorClass) {
+            submissionMessage.textContent = message;
+            submissionMessage.className = `text-center text-sm mt-3 ${colorClass}`;
+            submissionMessage.classList.remove('hidden');
+            setTimeout(() => {
+                submissionMessage.classList.add('hidden');
+            }, 5000);
+        }
+
+        // Global function for detail viewing (Simulated Modal/Detail View)
+        window.viewScreenplay = (id) => {
+            // In a real application, you would fetch the document by ID and display a modal.
+            // For this example, we show a console message and a brief alert message.
+            console.log("Viewing screenplay details for ID:", id);
+            showMessage(`Screenplay ID ${id} details loaded (check console).`, 'text-blue-400');
+        };
+
+        // Event Listeners
+        form.addEventListener('submit', uploadScreenplay);
+
+    </script>
+</body>
+</html>
